@@ -1,0 +1,220 @@
+
+---
+title: "Monte Carlo"
+output: html_document
+---
+
+```{r,echo=F}
+knitr::opts_chunk$set(cache=T)
+```
+
+
+
+## Example 3: hot hands
+
+For the next example, let's do something slightly more complicated.
+
+A certain professional basketball player believes he has "[hot hands](https://en.wikipedia.org/wiki/Hot_hand)" when shooting 3-point shots (i.e. if he makes a shot, he’s more likely to also make the next shot). His friend doesn’t believe him, so they make a wager and hire you, a statistician, to settle the bet.
+
+As a sample, you observe the next morning as the player takes the same 3-point shot 200 times in a row (assume he is well rested, in good physical shape, and doesn’t feel significantly more tired after the experiment), so his level of mental focus doesn’t change during the experiment). You obtain the following results, where Y denotes a success and N denotes a miss:
+
+```
+YNNNNYYNNNYNNNYYYNNNNNYNNNNNNNNNYNNNNNYYNYYNNNYNNNNYNNYYYYNNYYNNNNNNNNNNNNNNNYYYNNNYYYYNNNNNYNYYNNNNYNNNNNNYNNNYNNYNNNNNYNYYYNNYYYNYNNNNYNNNNNNNYYNNYYNNNNNNYNNNYNNNNNNNNYNNNYNNNNNYYNNNNNNYYYYYYNYYNNYN
+```
+
+Note that the existence of a "hot hands" effect means the shots are not independent. Also note that there's a third possibility: that the player is more likely to "[choke](https://en.wikipedia.org/wiki/Choke_(sports))" and miss the next shot if he scored the previous one (e.g. maybe scoring a shot makes him feel more nervous because he feels like he's under pressure).
+
+### Attempt 1: run length
+
+Since the existence of a hot hands effect tends to increase the run lengths of `Y`s compared to if the shots were independent, we can use the longest run length as a way of comparing independence vs hot hands (note if the player is a choker, they will tend to have shorter runs of `Y`s than if they were independent, so you can simply ignore this case for now and compare hot hands v. independence for simplicity).
+
+Now, how exactly do you compare these two situations and determine which is a better fit for the data?
+
+One thing that's worth noting is that ***if a sequence of repeated experiments is independent, then it shouldn't matter what order the results are in***. This should be fairly easy to understand and agree with.
+
+Let's ***assume that the throws are totally independent***. Recall we also assume he doesn't get tired so his baseline shot-making ability doesn't change over the course of the experiment. Therefore, we should be able to (under these assumptions) ***arbitrarily reorder his shots without affecting any statistical properties of his shot sequence***. So let's do that!
+
+We begin by parsing the throws into a vector of `Y` and `N`.
+
+```{r}
+# the sequence of throws is broken up into 4 chunks for readbility, then
+# paste0 is used to merge them into a single sequence, then
+# strplit("YN...N",split="") is used to split the string at every "", so
+# we get a vector of each character, and finally
+# [[1]] is used to get the vector itself (strsplit actually outputs a list
+# with the vector as the first element; [[1]] removes the list wrapper)
+# 
+# for more info about the strsplit function, see
+# https://www.journaldev.com/43001/strsplit-function-in-r
+
+throws = strsplit(
+   paste0("YNNNNYYNNNYNNNYYYNNNNNYNNNNNNNNNYNNNNNYYNYYNNNYNNN",
+          "NYNNYYYYNNYYNNNNNNNNNNNNNNNYYYNNNYYYYNNNNNYNYYNNNN",
+          "YNNNNNNYNNNYNNYNNNNNYNYYYNNYYYNYNNNNYNNNNNNNYYNNYY",
+          "NNNNNNYNNNYNNNNNNNNYNNNYNNNNNYYNNNNNNYYYYYYNYYNNYN"), split="")[[1]]
+
+throws
+```
+
+
+Next, we write a function to get the longest run of `Y`s in the throw sequence. Here we use a convenient function called `rle( )` which is short for [run length encoding](https://en.wikipedia.org/wiki/Run-length_encoding), which turns our sequence of throws into sequences of runs (e.g. YNNNNYYNNNY becomes something like "1 `Y`, 4 `N`s, 2 `Y`s, 3 `N`s, and 1 `Y`"). We can then simply take the longest of the `Y` runs.
+
+
+```{r}
+longestRun = function(x,target = 'Y'){
+    max(0,with(rle(x), lengths[values==target]))
+}
+
+longestRun(throws)
+```
+
+
+
+Now, we randomly shuffle the sequence of throws many times and see what the longest `Y` runs look like for these shuffled sequences.
+
+```{r}
+# set number of reps to use
+MCN = 10000
+
+# create vector to save results in
+mc.runs = rep(0,MCN)
+
+# for each rep, randomize sequence and find longest run of Y
+for(i in 1:MCN){
+    mc.runs[i] = longestRun(sample(throws))
+}
+```
+
+
+```{r}
+options(max.print=500)
+mc.runs
+```
+
+
+```{r}
+barplot(table(mc.runs))
+```
+```{r}
+mean(mc.runs >= 6)
+```
+
+compared to other shuffled sequences, our run length doesn't seem that unlikely. Therefore, this method seems inconclusive.
+
+Can we find an even better "statistic" to use?
+
+### Attempt 2: running odds ratio
+
+Consider **every pair of consecutive throws** and make a table of the outcomes. For example, the first 8 throws in the sequence are YNNNNYYN. Breaking this into consecutive pairs, we have YN, NN, NN, NN, NY, YY, YN. This gives the table:
+
+<center>
+<div style="width:100px;">
+
+| NN | NY | YN | YY |
+|:--:|:--:|:--:|:--:|
+| 3  | 1  | 2  | 1  |
+
+</div>
+</center>
+
+Suppose we do this for the entire sequence of 200 throws (note this gives you 199 pairs). If we **divide the number of NY by the number of NN**, we get an estimate for **how much _more_ likely he is to make the next shot _assuming he missed his last shot_**.
+
+Similarly, we can **divide the number of YY by the number of YN** to get an estimate for **how much _more_ likely he is to make the next shot _assuming he scored his last shot_**.
+
+Now, note that **if the "hot hands" effect really exists** in the data, then **YY/YN should be larger than NY/NN** in a large enough sample. We use this fact to define the following quantity:
+
+$$R=\frac{(\text{# of YY})/(\text{# of YN})}{(\text{# of NY})/(\text{# of NN})}$$
+
+The ratio $R$ represents, in some sense, **how much more likely** the player is to **make the next shot** if he **made the previous shot _vs_ if he didn't make the previous shot** (note the **_vs_**). This is exactly what we're trying to investigate!
+
+If there is a "hot hands" effect, the numerator should be greater than the denominator and we should have $R>1$. If the throws are independent and do not affect each other then in theory we should have $R=1$. If the player is actually a choker (i.e. he is more likely to miss after a successful shot), then we should have $R<1$. (Side note: this is basically an [odds ratio](https://journalfeed.org/article-a-day/2018/idiots-guide-to-odds-ratios)).
+
+Now, we can use the same general method as the first attempt. If we assume his throws are independent and his shot probability doesn't change significantly during the experiment, then we can randomly shuffle his throws and no properties should change. So let's do that!
+
+First, I wrote a function to split the sequence of throws into consecutive pairs and then tabulates them.
+
+
+```{r}
+# define function for tabulating consecutive pairs
+tableOfPairs = function(x) {n=length(x);Rfast::Table(paste(x[1:(n-1)],x[2:n],sep=""))}
+
+# test function for correct output
+tableOfPairs(strsplit("YNNNNYYN",split="")[[1]])
+```
+
+
+
+```{r}
+# run function on original sequence of throws
+tableOfPairs(throws)
+```
+
+Next, I wrote a function that takes the above table as an input and returns the ratio R as defined above.
+
+
+```{r}
+ratioFromTable = function(tb) setNames((tb["YY"]/tb["YN"])/(tb["NY"]/tb["NN"]),"R")
+
+# run on our data
+ratioFromTable(tableOfPairs(throws))
+```
+
+
+```{r}
+# we can check this is correct by manually computing it
+(28/35)/(34/102)
+```
+
+
+Now we just need to shuffle the sequence and see what this ratio looks like for other sequences.
+
+
+```{r}
+# set number of reps to use
+N = 100000
+
+# create another vector to save results in
+mc.ratios = rep(NA,N)
+
+# for each rep, randomize sequence and find ratio R
+for(i in 1:N){
+    mc.ratios[i] = ratioFromTable(tableOfPairs(sample(throws)))
+}
+
+# alternatively, use replicate
+mc.ratios = replicate(1e5,ratioFromTable(tableOfPairs(sample(throws))))
+```
+
+
+```{r}
+options(max.print=500)
+round(mc.ratios,2)
+```
+
+
+```{r}
+hist(mc.ratios)
+```
+
+```{r}
+mean(mc.ratios>=ratioFromTable(tableOfPairs(throws)))
+```
+
+Now we can see our original ratio of $R=2.4$ seems extremely unlikely! In particular, most of the shuffled statistics are centered around 1 (which is what we expect, since we established $R=1$ for independent sequences).
+
+This method (which is a little more refined than the simpler run length method) appears to show that our original sequence isn't well explained by the throws being independent. Since $R=2.4\gg1$ and this result appears unlikely to happen under independence, we may conclude **the player does actually have hot hands**.
+
+
+
+
+
+
+<br/>
+<br/>
+<br/>
+<br/>
+<br/>
+
+---
+
+
